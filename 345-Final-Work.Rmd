@@ -1,0 +1,44 @@
+---
+title: "345-Final-Work"
+author: "Tommy Armstrong"
+date: "2025-11-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Install if needed
+install.packages("tigris")
+
+# Load library
+library(tigris)
+
+# Download county boundaries for the whole U.S.
+counties <- counties(cb = TRUE)
+
+# Install if needed
+install.packages(c("tigris", "sf", "ggplot2"))
+
+library(tigris)
+library(sf)
+library(ggplot2)
+
+# Get all U.S. counties (simplified)
+counties <- counties(cb = TRUE)
+
+# Convert to sf object if needed
+counties_sf <- st_as_sf(counties)
+
+county_plot = ggplot(data = counties_sf) +
+  geom_sf(fill = "white", color = "gray40", size = 0.2) +
+  coord_sf(
+    xlim = c(-125, -66),   # longitude range (West to East)
+    ylim = c(24, 50)       # latitude range (South to North)
+  ) +
+  theme_minimal() +
+  labs(title = "U.S. County Boundaries (Contiguous States)",
+       caption = "Source: U.S. Census Bureau TIGER/Line Shapefiles")
+```
