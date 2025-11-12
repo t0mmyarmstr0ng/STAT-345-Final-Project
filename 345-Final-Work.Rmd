@@ -42,3 +42,7 @@ county_plot = ggplot(data = counties_sf) +
   labs(title = "U.S. County Boundaries (Contiguous States)",
        caption = "Source: U.S. Census Bureau TIGER/Line Shapefiles")
 ```
+
+```{r}
+example.file <- st_read("~/Desktop/tl_2023_01001_roads/tl_2023_01001_roads.shp")
+```
