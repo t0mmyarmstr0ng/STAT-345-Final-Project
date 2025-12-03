@@ -46,4 +46,145 @@ county_plot = ggplot(data = counties_sf) +
 ```{r}
 example.file <- st_read("~/Desktop/tl_2023_01001_roads/tl_2023_01001_roads.shp")
 ```
+
 Testing pull
+
+Unzip, grab .shp, add GEOID, store it, then join them all together (use bindrows), if memory issues run remove shp files
+
+```{r}
+#Download every zip file into single folder
+
+library(rvest)
+library(purrr)
+
+# URL of the directory
+base_url <- "https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"
+
+# Read the HTML directory listing
+page <- read_html(base_url)
+
+# Extract all .zip file names
+zip_files <- page %>%
+  html_nodes("a") %>%
+  html_attr("href") %>%
+  grep("\\.zip$", ., value = TRUE)
+
+zip_files
+# Example: "tl_2023_01001_roads.zip", etc.
+
+# Create download folder
+dir.create("tiger_roads_2023", showWarnings = FALSE)
+
+# Download each zip file
+walk(zip_files, ~{
+  download.file(
+    url = paste0(base_url, .x),
+    destfile = file.path("tiger_roads_2023", .x),
+    mode = "wb"
+  )
+})
+
+
+#install.packages("RSelenium")
+#install.packages("netstat")
+
+library(tidyverse)
+library(RSelenium)
+library(netstat)
+
+#Connecting to server
+rs_driver_object = rsDriver(
+  browser = 'chrome',
+  chromever = NULL,
+  verbose = FALSE,
+  port = free_port()
+)
+
+system("chrome --version")              # Mac
+
+
+system('wget -r -np -nd -A zip https://www2.census.gov/geo/tiger/TIGER2023/ROADS/')
+```
+
+```{r}
+library(rvest)
+library(httr)
+library(purrr)
+library(fs)
+
+url <- "https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"   # change this
+
+# Get all links on the page
+page <- read_html(url)
+files <- page %>% html_nodes("a") %>% html_attr("href")
+
+# Keep only files (not parent dirs)
+files <- files[grepl("\\.(csv|txt|zip|pdf|xlsx)$", files, ignore.case = TRUE)]
+
+# Turn into full URLs
+file_urls <- paste0(url, files)
+file_urls
+
+
+##############################################
+
+for (i in year_start:year_last){
+  j=c(1:4)
+  for (m in j){
+    link.stem <- "https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"
+    url1<-paste0(link.stem,i,"/demo",i,"q",m,".csv.zip")
+    download.file(url1,dest="data.zip") # Demography
+    unzip ("data.zip")
+   
+    
+    
+     
+start = "tl_2023_"
+pattern = "\\d{5}"
+end = "_roads.zip"
+
+
+dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
+
+
+#for (files in 1:100){
+#  download.file(file_urls[files], dest = paste0(pattern, end)),
+#  destfile = file.path("tiger_roads_2023_attempt_2", .x),
+#}
+
+
+dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
+
+for (files in 5:10){
+  fname <- basename(file_urls[files])
+  download.file(
+    url = file_urls[files],
+    destfile = file.path("tiger_roads_2023_attempt_2", fname),
+    mode = "wb"
+  )
+}
+
+#Map_df
+
+head(file_urls, 10)
+
+```
+
+## Actual working code
+
+```{r}
+dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
+
+for (files in 5:10){
+  fname <- basename(file_urls[files])
+  download.file(
+    url = file_urls[files],
+    destfile = file.path("tiger_roads_2023_attempt_2", fname),
+    mode = "wb"
+  )
+}
+
+#Map_df
+
+head(file_urls, 10)
+```
