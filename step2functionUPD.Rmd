@@ -17,6 +17,8 @@ library(purrr)
 #install.packages(c("tigris", "sf", "ggplot2"))
 ```
 
+# Most Popular Road Suffix & Count (Plot 1)
+
 ```{r}
 #url <- https://www2.census.gov/geo/tiger/TIGER2023/ROADS/
 # tested on first availible zip file
@@ -91,6 +93,8 @@ process_county_roads_folder <- function(folder_path) {
   return(results)
 }
 ```
+
+# Proportion of Most popular road suffix to total roads (Plot 2)
 
 ```{r}
 # (PROPORTION FUNCTION)
@@ -178,6 +182,8 @@ process_county_roads_folder_prop <- function(folder_path) {
   return(results)
 }
 ```
+
+# Tests
 
 ```{r}
 df <- process_county_roads_zip("tl_2023_01001_roads.zip")
