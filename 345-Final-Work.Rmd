@@ -9,9 +9,10 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Creating initial US County Map
+
 ```{r}
-# Install if needed
-install.packages("tigris")
+#install.packages("tigris")
 
 # Load library
 library(tigris)
@@ -43,13 +44,7 @@ county_plot = ggplot(data = counties_sf) +
        caption = "Source: U.S. Census Bureau TIGER/Line Shapefiles")
 ```
 
-```{r}
-example.file <- st_read("~/Desktop/tl_2023_01001_roads/tl_2023_01001_roads.shp")
-```
-
-Testing pull
-
-Unzip, grab .shp, add GEOID, store it, then join them all together (use bindrows), if memory issues run remove shp files
+## Attempt to download files, not final code
 
 ```{r}
 #Download every zip file into single folder
@@ -105,6 +100,8 @@ system("chrome --version")              # Mac
 
 system('wget -r -np -nd -A zip https://www2.census.gov/geo/tiger/TIGER2023/ROADS/')
 ```
+
+## Attempt to download files, not final code
 
 ```{r}
 library(rvest)
@@ -170,12 +167,12 @@ head(file_urls, 10)
 
 ```
 
-## Actual working code
+## Actual working code for downloading files
 
 ```{r}
 dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
 
-for (files in 5:10){
+for (files in 930:940){
   fname <- basename(file_urls[files])
   download.file(
     url = file_urls[files],
@@ -184,7 +181,193 @@ for (files in 5:10){
   )
 }
 
-#Map_df
-
 head(file_urls, 10)
+
+dir.create("tiger_roads_2023_attempt_3", showWarnings = FALSE)
+
+chunk_size <- 25
+total_downloads <- 3233
+
+for (start_i in seq(937, total_downloads, by = chunk_size)) {
+  end_i <- min(start_i + chunk_size - 1, total_downloads)
+  cat("Downloading files", start_i, "to", end_i, "\n")
+  for (i in start_i:end_i) {
+    fname <- basename(file_urls[i])
+    download.file(
+      url = file_urls[i],
+      destfile = file.path("tiger_roads_2023_attempt_3", fname),
+      mode = "wb"
+    )
+  }
+}
+
+#20077 is  number 929
+#940
+#Code crashed once during downloading, this is to track where we were in the download process
+
+```
+
+## Running function on code folder
+
+```{r}
+finished_download = process_county_roads_folder("//Users//tommyarmstrong//Desktop//tiger_roads_2023_attempt_3//")
+
+
+#Create CSV to share
+write.csv(finished_download, "finished_download.csv", row.names = FALSE)
+
+#Read in the finished data for part 1
+plot1data = read.csv("finished_download.csv")
+
+```
+
+## Function and dataset making for plot 2
+
+```{r}
+# (PROPORTION FUNCTION)
+process_county_roads_zip_prop <- function(zip_file) {
+  
+  # 1. Extract GEOID
+  geoid <- str_extract(basename(zip_file), "\\d{5}")
+  
+  # 2. Create temp directory
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  
+  # 3. Unzip safely
+  unzip(zip_file, exdir = temp_dir)
+  
+  # 4. Find shapefile
+  shp_file <- list.files(temp_dir, pattern = "\\.shp$", full.names = TRUE)
+  
+  # 5. Read shapefile
+  roads <- st_read(shp_file[1], quiet = TRUE)
+  
+  # 6. Extract suffix
+  if ("SUFTYP" %in% names(roads)) {
+    roads$suffix <- roads$SUFTYP
+  } else if ("FULLNAME" %in% names(roads)) {
+    roads$suffix <- str_extract(roads$FULLNAME, "\\b\\w+$")
+  } else {
+    return(NULL)
+  }
+  
+  # 7. Clean suffix
+  roads <- roads %>%
+    dplyr::mutate(
+      suffix = str_to_upper(suffix),
+      suffix = str_replace_all(suffix, "\\.", ""),
+      suffix = str_trim(suffix)
+    )
+  
+  # 8. Drop geometry, remove missing
+  roads_clean <- roads %>%
+    st_drop_geometry() %>%
+    filter(!is.na(suffix), suffix != "") %>%
+    count(suffix, name = "n")
+  
+  # 9. Total roads
+  total_roads <- roads_clean %>%
+    summarise(total = sum(n)) %>%
+    pull(total)
+  
+  # 10. Most common suffix
+  top_suffix <- roads_clean %>%
+    slice_max(n, n = 1, with_ties = FALSE)
+  
+  # 11. Add proportion
+  out <- top_suffix %>%
+    mutate(
+      GEOID = geoid,
+      proportion = n / total_roads
+    ) %>%
+    select(GEOID, suffix, n, proportion)
+  
+  # 12. Cleanup temp files
+  unlink(temp_dir, recursive = TRUE)
+  
+  return(out)
+}
+
+# Folder Wrapper Function (PROPORTION FUNCTION)
+process_county_roads_folder_prop <- function(folder_path) {
+  # Get each file from folder
+  zip_files <- list.files(
+    folder_path,
+    pattern = "\\.zip$",
+    full.names = TRUE
+  )
+  
+  # Apply function to each folder
+  results <- purrr::map_dfr(
+    zip_files,
+    process_county_roads_zip_prop
+  )
+    
+  return(results)
+}
+
+plot2data = process_county_roads_folder_prop("//Users//tommyarmstrong//Desktop//tiger_roads_2023_attempt_3//")
+
+write.csv(plot2data, "plot2data.csv", row.names = FALSE)
+```
+
+## Plot 3 Data and work
+
+```{r}
+hospital.data = read.csv("Hospital_General_Information.csv")
+
+
+#Hospital data set
+hospital.data = hospital.data |> 
+  mutate(county.name = tolower(County.Parish)) |> 
+  select(Address, City.Town, State, Hospital.Type, county.name)
+
+#US county data set
+counties_sf = counties_sf |> 
+  mutate(county.name = tolower(NAME)) |> 
+  rename(State = STUSPS)
+
+#combining the two 
+plot3data = left_join(counties_sf, hospital.data, by = c("county.name", "State"))
+
+#Cleaning the combined data set
+plot3data = plot3data |> 
+  select(Address, county.name, State, Hospital.Type, GEOID, ALAND, AWATER, geometry) |>
+  group_by(county.name, State) |>
+  mutate(hospital.per.county = n())
+
+head(plot3data)
+
+#turning dataset back into sf file
+class(plot3data)
+plot3data = sf::st_as_sf(plot3data)
+
+class(plot3data)
+plot3data = sf::st_as_sf(plot3data)
+
+
+#Making plot
+plot3 = plot3data |>
+  ggplot() +
+  geom_sf(aes(fill = hospital.per.county), color = NA, size = .2) +
+  coord_sf(
+    xlim = c(-125, -66),
+    ylim = c(24, 50)
+  ) +
+  scale_fill_viridis_c(
+    trans = "log10",
+    option = "plasma", 
+    name = "Hospitals per County") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "Number of Hospitals in each U.S. County")
+
+
+#Showing plot
+plot3
 ```
