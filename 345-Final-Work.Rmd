@@ -314,6 +314,8 @@ write.csv(plot2data, "plot2data.csv", row.names = FALSE)
 
 ## Plot 3 Data and work
 
+Data from: <https://data.cms.gov/provider-data/dataset/xubh-q36u#data-table>
+
 ```{r}
 hospital.data = read.csv("Hospital_General_Information.csv")
 
