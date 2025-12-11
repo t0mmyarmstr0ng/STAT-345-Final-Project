@@ -1,0 +1,626 @@
+---
+title: "What's Your Address - STAT 345 Final Project"
+author: "Shelby Hennlich, Mason Wagner, and Tommy Armstrong"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+date: "2025-12-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 6) #used to create larger plots in word document
+
+```
+
+```{r library_load, echo = FALSE, message = FALSE, warning = FALSE}
+
+#Loads necessary packages for the remainder of the report
+
+library(dplyr)
+library(tigris)
+library(sf)
+library(ggplot2)
+
+```
+
+## I. Introduction to Data
+
+The physical map of U.S. counties used in every part of the report came from the United States Census Bureau "TIGER" Shape-files database. This database provided the polygon-outlines of each county of the U.S. in the form of a condensed map.
+
+The road-data used in Part III and Part IV came from the United States Census Bureau "TIGER" database. This database contains the road suffixes for every road in every county and territory of the country, stored in the form of over 3,000 zip files of addresses. While each county's zip file contains many variables of information, the report primarily focused on GEOIDs and the street suffixes of each address.
+
+-   A GEOID is a five-digit code used by the Census Bureau to help identify each county of the United States. In the data, these IDs are used to show which county each address comes from. These IDs were essential in both the joining and plotting of data further along in the report.
+
+-   Street suffixes refer to the abbreviations or endings of road names, with common road names like street, avenue, and road being shortened to st, ave, and rd. These suffixes are typically used as short-hand in directional technology, mailing services, and addresses. In the report, the street suffixes provided by the TIGER data were used to identify any trends of suffix-popularity across the U.S. counties.
+
+The hospital data used in Part V came from the Centers for Medicare & Medicaid Services (CMS) "General Information of Hospitals" database. Within this database, the addresses and county-locations of every registered hospital in the country are listed in the form of GEOIDs. These county-locations of hospitals were used in this report to visualize the dispersion of hospitals across the counties of the U.S..
+
+## II. Data Collection Process
+
+While the hospital data described above was able to be downloaded as a csv file from the CMS website, the road-data and county-data required a more intense data collection process.
+
+From the "TIGER" Shape-files, a U.S. county-map outline was created and served as the background map for each plot within the report. This county-map outline can be seen below:
+
+```{r county_map, echo = FALSE, message = FALSE}
+
+# Downloads county boundaries for the whole U.S.
+invisible(capture.output({
+  counties <- counties(cb = TRUE)
+})) #used to hide progress bars in word document (Source: basic functions of R --> found using ?invisible and ?capture.output)
+
+
+# Convert to sf object if needed
+counties_sf <- st_as_sf(counties)
+
+county_plot = ggplot(data = counties_sf) +
+  geom_sf(fill = "white", color = "black", size = 0.0005, alpha = 0.4) +
+  coord_sf(
+    xlim = c(-125, -66),   # longitude range (West to East)
+    ylim = c(24, 50)       # latitude range (South to North)
+  ) +
+  theme_minimal() + theme( plot.title = element_text(size = 10)) + 
+  labs(title = "U.S. County Boundaries (Contiguous States)",
+       caption = "Source: U.S. Census Bureau TIGER/Line Shapefiles")
+
+#Shows county-map outline
+county_plot
+
+```
+
+From the 3,000+ zip files of road-data, two csv files were created: one showing the most popular street suffix used in each county and one that showed the proportion of roads within each county that ended in its most popular street suffix. These csv files were the primary data sources used in Part 3 and Part 4.
+
+```{r data_scraping, echo = FALSE, eval = FALSE}
+
+#NOTE: code chunk shows process that downloaded files off of U.S. Census Bureau website; code is provided to show process but is not evaluated due to slow run times and taking up of computer storage space
+
+dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
+
+#runs test on urls
+for (files in 930:940){
+  fname <- basename(file_urls[files])
+  download.file(
+    url = file_urls[files],
+    destfile = file.path("tiger_roads_2023_attempt_2", fname),
+    mode = "wb"
+  )
+}
+
+head(file_urls, 10)
+
+#breaks urls into chunks of 25 to be downloaded until all urls are downloaded
+dir.create("tiger_roads_2023_attempt_3", showWarnings = FALSE)
+
+chunk_size <- 25
+total_downloads <- 3233
+
+#runs for loop to download all urls by chunk size of 25 use base name of each file
+for (start_i in seq(937, total_downloads, by = chunk_size)) {
+  end_i <- min(start_i + chunk_size - 1, total_downloads)
+  cat("Downloading files", start_i, "to", end_i, "\n")
+  for (i in start_i:end_i) {
+    fname <- basename(file_urls[i])
+    download.file(
+      url = file_urls[i],
+      destfile = file.path("tiger_roads_2023_attempt_3", fname),
+      mode = "wb"
+    )
+  }
+}
+
+#Tracks process of downloading files
+
+#20077 is  number 929
+#940
+#Code crashed once during downloading, this is to track where we were in the download process
+
+
+
+```
+
+```{r popular_suffix_function, echo = FALSE, eval = FALSE}
+
+#NOTE: functions are shown to show how suffix csv was created but are not evaluated to prevent long-running times and save storage space in computer
+
+#url <- https://www2.census.gov/geo/tiger/TIGER2023/ROADS/
+# tested on first availible zip file
+  
+# function to process, unzip, read, and return a datframe of GEOID, road suffixes, and their counts for a county given a counties zip file
+
+process_county_roads_zip <- function(zip_file) {
+  
+  # 1. Extract GEOID
+  geoid <- str_extract(basename(zip_file), "\\d{5}")
+  
+  # 2. Create temp directory
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  
+  # 3. Unzip safely
+  unzip(zip_file, exdir = temp_dir)
+  
+  # 4. Find shapefile
+  shp_file <- list.files(temp_dir, pattern = "\\.shp$", full.names = TRUE)
+  
+  # 5. Read shapefile
+  roads <- st_read(shp_file[1], quiet = TRUE)
+  
+  # 6. Extract suffix
+  if ("SUFTYP" %in% names(roads)) {
+    roads$suffix <- roads$SUFTYP
+  } else if ("FULLNAME" %in% names(roads)) {
+    roads$suffix <- str_extract(roads$FULLNAME, "\\b\\w+$")
+  } else {
+    return(NULL)
+  }
+  
+  # 7. Clean suffix
+  roads <- roads %>%
+    dplyr::mutate(
+      suffix = str_to_upper(suffix),
+      suffix = str_replace_all(suffix, "\\.", ""),
+      suffix = str_trim(suffix)
+    )
+  
+  # 8. Count
+  out <- roads %>%
+    st_drop_geometry() %>%
+    filter(!is.na(suffix), suffix != "") %>%
+    count(GEOID = geoid, suffix, name = "n") %>%
+    slice_max(n, n=1, with_ties = FALSE)
+  
+  # 9. Cleanup temp files
+  unlink(temp_dir, recursive = TRUE)
+  
+  return(out)
+}
+
+
+# Folder Wrapper Function
+process_county_roads_folder <- function(folder_path) {
+  # Get each file from folder
+  zip_files <- list.files(
+    folder_path,
+    pattern = "\\.zip$",
+    full.names = TRUE
+  )
+  
+  # Apply function to each folder
+  results <- purrr::map_dfr(
+    zip_files,
+    process_county_roads_zip
+  )
+    
+  return(results)
+}
+
+
+
+#Produces csv for most popular road suffix data
+
+finished_download = process_county_roads_folder("//Users//tommyarmstrong//Desktop//tiger_roads_2023_attempt_3//")
+
+
+#Create CSV to share
+write.csv(finished_download, "finished_download.csv", row.names = FALSE)
+
+#Read in the finished data for part 1
+plot1data = read.csv("finished_download.csv")
+
+#NOTE: finished_download.csv renamed to road_data_1.csv for remainder of the report
+
+```
+
+```{r proportion_function, echo = FALSE, eval = FALSE}
+
+#NOTE: functions are shown to show how proportion csv was created but  are not evaluated to prevent long-running times and save storage space in computer
+
+# (PROPORTION FUNCTION)
+process_county_roads_zip_prop <- function(zip_file) {
+  
+  # 1. Extract GEOID
+  geoid <- str_extract(basename(zip_file), "\\d{5}")
+  
+  # 2. Create temp directory
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  
+  # 3. Unzip safely
+  unzip(zip_file, exdir = temp_dir)
+  
+  # 4. Find shapefile
+  shp_file <- list.files(temp_dir, pattern = "\\.shp$", full.names = TRUE)
+  
+  # 5. Read shapefile
+  roads <- st_read(shp_file[1], quiet = TRUE)
+  
+  # 6. Extract suffix
+  if ("SUFTYP" %in% names(roads)) {
+    roads$suffix <- roads$SUFTYP
+  } else if ("FULLNAME" %in% names(roads)) {
+    roads$suffix <- str_extract(roads$FULLNAME, "\\b\\w+$")
+  } else {
+    return(NULL)
+  }
+  
+  # 7. Clean suffix
+  roads <- roads %>%
+    dplyr::mutate(
+      suffix = str_to_upper(suffix),
+      suffix = str_replace_all(suffix, "\\.", ""),
+      suffix = str_trim(suffix)
+    )
+  
+  # 8. Drop geometry, remove missing
+  roads_clean <- roads %>%
+    st_drop_geometry() %>%
+    filter(!is.na(suffix), suffix != "") %>%
+    count(suffix, name = "n")
+  
+  # 9. Total roads
+  total_roads <- roads_clean %>%
+    summarise(total = sum(n)) %>%
+    pull(total)
+  
+  # 10. Most common suffix
+  top_suffix <- roads_clean %>%
+    slice_max(n, n = 1, with_ties = FALSE)
+  
+  # 11. Add proportion
+  out <- top_suffix %>%
+    mutate(
+      GEOID = geoid,
+      proportion = n / total_roads
+    ) %>%
+    select(GEOID, suffix, n, proportion)
+  
+  # 12. Cleanup temp files
+  unlink(temp_dir, recursive = TRUE)
+  
+  return(out)
+}
+
+
+# Folder Wrapper Function (PROPORTION FUNCTION)
+process_county_roads_folder_prop <- function(folder_path) {
+  # Get each file from folder
+  zip_files <- list.files(
+    folder_path,
+    pattern = "\\.zip$",
+    full.names = TRUE
+  )
+  
+  # Apply function to each folder
+  results <- purrr::map_dfr(
+    zip_files,
+    process_county_roads_zip_prop
+  )
+    
+  return(results)
+}
+
+
+#Produces csv for suffix proportion data
+
+plot2data = process_county_roads_folder_prop("//Users//tommyarmstrong//Desktop//tiger_roads_2023_attempt_3//")
+
+write.csv(plot2data, "plot2data.csv", row.names = FALSE)
+
+#NOTE: plot2datacsv renamed to road_data_2.csv for remainder of the report
+
+
+
+
+```
+
+```{r practice_code, echo = FALSE, eval = FALSE}
+
+#This code chunk shows our previous attempts at data-collecting that ultimately did not work. It helped in the development of all functions seen in the code chunks above and  we have therefore chosen to include it in our report.
+
+
+#Attempt 1
+
+#Download every zip file into single folder
+
+library(rvest)
+library(purrr)
+
+# URL of the directory
+base_url <- "https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"
+
+# Read the HTML directory listing
+page <- read_html(base_url)
+
+# Extract all .zip file names
+zip_files <- page %>%
+  html_nodes("a") %>%
+  html_attr("href") %>%
+  grep("\\.zip$", ., value = TRUE)
+
+zip_files
+# Example: "tl_2023_01001_roads.zip", etc.
+
+# Create download folder
+dir.create("tiger_roads_2023", showWarnings = FALSE)
+
+# Download each zip file
+walk(zip_files, ~{
+  download.file(
+    url = paste0(base_url, .x),
+    destfile = file.path("tiger_roads_2023", .x),
+    mode = "wb"
+  )
+})
+
+
+#install.packages("RSelenium")
+#install.packages("netstat")
+
+library(tidyverse)
+library(RSelenium)
+library(netstat)
+
+#Connecting to server
+rs_driver_object = rsDriver(
+  browser = 'chrome',
+  chromever = NULL,
+  verbose = FALSE,
+  port = free_port()
+)
+
+system("chrome --version")              # Mac
+
+
+system('wget -r -np -nd -A zip https://www2.census.gov/geo/tiger/TIGER2023/ROADS/')
+
+
+#Attempt 2
+
+library(rvest)
+library(httr)
+library(purrr)
+library(fs)
+
+url <- "https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"   # change this
+
+# Get all links on the page
+page <- read_html(url)
+files <- page %>% html_nodes("a") %>% html_attr("href")
+
+# Keep only files (not parent dirs)
+files <- files[grepl("\\.(csv|txt|zip|pdf|xlsx)$", files, ignore.case = TRUE)]
+
+# Turn into full URLs
+file_urls <- paste0(url, files)
+file_urls
+
+
+##############################################
+
+for (i in year_start:year_last){
+  j=c(1:4)
+  for (m in j){
+    link.stem <- "https://www2.census.gov/geo/tiger/TIGER2023/ROADS/"
+    url1<-paste0(link.stem,i,"/demo",i,"q",m,".csv.zip")
+    download.file(url1,dest="data.zip") # Demography
+    unzip ("data.zip")
+   
+  }
+}
+    
+     
+start = "tl_2023_"
+pattern = "\\d{5}"
+end = "_roads.zip"
+
+
+dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
+
+
+#for (files in 1:100){
+#  download.file(file_urls[files], dest = paste0(pattern, end)),
+#  destfile = file.path("tiger_roads_2023_attempt_2", .x),
+#}
+
+
+dir.create("tiger_roads_2023_attempt_2", showWarnings = FALSE)
+
+for (files in 5:10){
+  fname <- basename(file_urls[files])
+  download.file(
+    url = file_urls[files],
+    destfile = file.path("tiger_roads_2023_attempt_2", fname),
+    mode = "wb"
+  )
+}
+
+#Map_df
+
+head(file_urls, 10)
+
+
+
+```
+
+## III. Exploring Road Suffix Popularity
+
+This first plot explores the most popular road suffix of each county by calculating which road suffix had the highest count or appeared the most in road names of each county.
+
+It should be noted that the plot only showcases the most popular road suffix for mainland U.S. counties and excludes information on Alaska, Hawaii, and any U.S. territories.
+
+This plot emphasizes rural and urban differences in road suffixes, as well as possible geographical influences.
+
+A view of both the suffix popularity data set and its corresponding plot can be seen below:
+
+```{r plot_1, echo = FALSE}
+
+#Data 1: suffix popularity data
+
+road_data_1 <- read.csv("road_data_1.csv") #reads in first set of data from function 1
+
+road_data_1 <- road_data_1 %>% filter(GEOID < 60000)#only pulls suffixes from main U.S. counties excluding  Puerto Rice and other U.S. territories (any GEOID higher than 59999)
+
+converted_rd_1 <- road_data_1 %>% mutate(GEOID = sprintf("%05d", GEOID)) #adds back first-digit "0" that was removed in data-pulling to prepare for data-joining (Source: https://www.geeksforgeeks.org/r-language/print-a-formatted-string-in-r-programming-sprintf-function/)
+
+head(converted_rd_1)
+
+plot_1_data <- counties_sf %>% 
+ left_join(converted_rd_1, by = "GEOID") #joins counties_sf data and  road_data_1 by GEOID to help with building of plot 1
+
+
+
+
+#Plot 1: suffix popularity plot
+
+#Creates plot showcasing which road suffix  is the most popular in each county in h the United States
+plot_1 <- ggplot(plot_1_data) + geom_sf(aes(fill = suffix), color = NA, size = 0.01) + scale_fill_viridis_d(option = "turbo", na.translate = FALSE)  +  theme_minimal() +  theme(
+    panel.grid.major = element_blank(), #erases grid background (will be used in all plots)
+    panel.grid = element_blank(),
+    plot.title = element_text(size = 10),
+     legend.key.size = unit(0.4, "cm"),
+    legend.text = element_text(size = 8),
+  legend.title = element_text(size = 9) #adjusts size of various elements in plot (will be used in all plots)
+  )  + coord_sf(
+ xlim = c(-125, -66),
+ ylim = c(24, 50) #ensures map is alligned to correct spot (will be used in all plots)
+)+ labs(
+  title = "The Most Common Road Suffix of Each County of the United States",
+ fill = "Suffix"
+)
+
+#Shows plot 1 (with legend adjusted to more columns (Source:  https://ggplot2.tidyverse.org/reference/guides.html)
+plot_1 + guides(fill = guide_legend(ncol = 3))
+```
+
+From the plot, it is clear that there is a great variety of popular suffixes throughout the U.S. counties, with the Rd and St suffixes being the most popular road suffix for the largest number of counties. As can be seen in the legend, common road suffixes, like Ave, Dr, and Ln, as can be expected, also made up are large number of the most popular suffixes in U.S. counties. However, more surprisingly, abnormal suffixes like Cir and Fs and directional suffixes (N, E, S, W, NE, SW, NW, SE) also appeared in some counties as the most popular suffix.
+
+In terms of general patterns seen in the plot, it appears that in large, urban cities, such as New York City and Los Angeles, the most popular road suffix of the county is St. In more rural areas, like the Great Plains, the most popular road suffix of the county is typically Rd. This could account for city-grids often being more compact and organized by First, Second, Third, etc. Streets, while more rural areas have less need for structure and can therefore have the more vague Rd suffix.
+
+For directional suffixes, there appeared to be a general spread of its popularity, but a notable concentration of directional suffixes in the North and South Dakota regions. While there is no clear reasoning behind this direction, it could be further explored in a report studying road suffix popularity of the Midwest specifically.
+
+## IV. Exploring Proportions within Road Suffix Popularity
+
+Expanding on the first plot above, this plot follows the same process of finding the most popular road suffix of each county, but instead displays the proportion of the county's roads that contain its most popular suffix.
+
+Similar to the first plot, the second plot again only shows the proportion data for the U.S. mainland counties and their roads.
+
+This plot again emphasizes rural and urban differences in road suffixes, but focuses primarily on road suffix diversity within each county.
+
+A view of both the suffix popularity-proportion data set and its corresponding plot can be seen below:
+
+```{r plot_2, echo = FALSE}
+
+#Data 2: suffix popularity-proportion data
+
+road_data_2 <- read.csv("road_data_2.csv") #reads in second set of data from function 2
+
+road_data_2 <- road_data_2 %>% filter(GEOID < 60000)#only pulls suffixes from main U.S. counties excluding  Puerto Rice and other U.S. territories
+
+converted_rd_2 <- road_data_2 %>% mutate(GEOID = sprintf("%05d", GEOID)) #adds back first-digit "0" that was removed in data-pulling to prepare for data-joining(Source: https://www.geeksforgeeks.org/r-language/print-a-formatted-string-in-r-programming-sprintf-function/)
+
+head(converted_rd_2)
+
+
+plot_2_data <- counties_sf %>% 
+ left_join(converted_rd_2, by = "GEOID") #joins counties_sf data and  road_data_2 by GEOID to help with building of plot 2
+
+
+
+
+
+
+#Plot 2: suffix popularity-proportion plot
+
+
+#Creates plot showcasing the proportion of roads in the county that end with the county's designated most popular suffix
+plot_2 <- ggplot(plot_2_data) + geom_sf(aes(fill = proportion), color = NA, size = 0.1) + scale_fill_gradient(low = "white", high = "darkblue" )+  theme_minimal() +  theme(
+    panel.grid.major = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(size = 10)
+  ) + coord_sf(
+ xlim = c(-125, -66),
+ ylim = c(24, 50)
+) + labs(
+  title = "Proportion of Each  U.S. County's Roads with Most Common Road Suffix",
+  fill = "Proportion"
+)
+
+#Shows plot 2
+plot_2
+```
+
+From the above plot, it is clear that for the majority of counties in the mainland U.S. have a relatively low proportion of their roads containing their most popular suffix, suggesting general diversity in road-suffix diversity.
+
+In the southwest counties, especially those in New Mexico, Arizona, and Utah, there appears to be a generally lower proportion of county road names containing its most popular suffix. This suggests greater suffix diversity, possibly due to greater numbers of towns and cities in more populated areas.
+
+Along the 100-degree West line, there also appears to be a pattern of very high proportions of county road names containing its most popular suffix. A possible explanation of this could be a larger amount of rural or less populated areas or multi-state road systems, accounting for less needed diversity in road names and suffixes. However, the counties in Maine and New York, a generally well-populated area also show high proportions of the popular-road suffix, so further exploration would be needed to show any connections.
+
+## V. Exploring Count of Hospitals in Each U.S. County
+
+While the report has so far used the map of U.S. counties to observe the popularity and proportions of road suffixes, it can also be a helpful tool in observing the counts of another county service: hospitals.
+
+More specifically, by creating a map that counts the total number of hospitals in each county, it is possible to see both the dispersement of hospitals across the nation and its connection to current societal and health-related trends.
+
+```{r plot_3, echo = FALSE, warning = FALSE, message = FALSE}
+
+#Data 3: hospital count data
+
+#Loads hospital data from CMS source
+hospital.data = read.csv("Hospital_General_Information.csv")
+
+
+#Creates hospital data set
+hospital.data = hospital.data |> 
+  mutate(county.name = tolower(County.Parish)) |> 
+  select(Address, City.Town, State, Hospital.Type, county.name)
+
+#Reloads US county data set
+counties_sf_reloaded = counties_sf |> 
+ mutate(county.name = tolower(NAME)) |> 
+  rename(State = STUSPS)
+
+#combining the two 
+plot3data = left_join(counties_sf_reloaded, hospital.data, by = c("county.name", "State"))
+
+#Cleaning the combined data set
+plot3data = plot3data |> 
+  select(Address, county.name, State, Hospital.Type, GEOID, ALAND, AWATER, geometry) |>
+  group_by(county.name, State) |>
+  mutate(hospital.per.county = n())
+
+#turning dataset back into sf file
+plot3data = sf::st_as_sf(plot3data)
+
+
+
+
+
+#Plot 3: hospital counts plot
+
+#Making plot
+plot3 = plot3data |>
+  ggplot() +
+  geom_sf(aes(fill = hospital.per.county), color = NA, size = .2) +
+  coord_sf(
+    xlim = c(-125, -66),
+    ylim = c(24, 50)
+  ) +
+  scale_fill_viridis_c(
+    trans = "log10", #creates more accurate scale in legend
+    option = "plasma", 
+    name = "Hospitals per County") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid = element_blank(),
+     plot.title = element_text(size = 10)
+  ) +
+  labs(
+    title = "Number of Hospitals in each U.S. County")
+
+
+#Shows plot 3
+plot3
+```
+
+Broadly, hospital trends in the states appear to follow a population density trend. The more populated areas have more hospitals. Counties with larger cities such as Los Angeles County (Los Angeles, CA), Cook County (Chicago, IL), Harris County (Houston, TX), and Dallas County (Dallas, TX)  tend to have high hospital counts. With that, many rural counties, especially in the Great Plains, have lower hospital counts. A growing health care concern is hospital access in rural counties, and the low counts in these rural areas might aid in explaining this. Another visible trend is the hospital coverage on the west coast. Spanning from the southern border of New Mexico to Northwest Washington, the dark purple color is rare compared to other areas. This means that the west coast is higher in hospital count compared to other areas of the U.S.. This trend is also seen in the northeast. States like Maine, New York, and Massachusetts are also a lighter color, meaning that they have more hospitals. This map only shows the number of hospitals per county. It does not provide insight into the quality of hospital or its access. 
